@@ -164,7 +164,11 @@ import {
   V3RouteWithValidQuote,
   V4RouteWithValidQuote,
 } from './entities/route-with-valid-quote';
-import { BestSwapRoute, getBestSwapRoute, getBestSwapRouteWithoutEstimate } from './functions/best-swap-route';
+import {
+  BestSwapRoute,
+  getBestSwapRoute,
+  getBestSwapRouteWithoutEstimate,
+} from './functions/best-swap-route';
 import { calculateRatioAmountIn } from './functions/calculate-ratio-amount-in';
 import {
   CandidatePoolsBySelectionCriteria,
@@ -1668,11 +1672,39 @@ export class AlphaRouter
       v3GasModel,
       v4GasModel,
       swapConfig,
-      providerConfig,
+      providerConfig
     );
     reportGetBestSwapRouteElapsedTime();
 
-    return bestSwapRoute;
+    const routes = bestSwapRoute?.routes;
+    if (!routes) {
+      throw new Error('route not found');
+    }
+
+    const trade = buildTrade<typeof tradeType>(
+      currencyIn,
+      currencyOut,
+      tradeType,
+      routes
+    );
+
+    let methodParameters: MethodParameters | undefined;
+
+    // If user provided recipient, deadline etc. we also generate the calldata required to execute
+    // the swap and return it too.
+    if (swapConfig) {
+      methodParameters = buildSwapMethodParameters(
+        trade,
+        swapConfig,
+        this.chainId
+      );
+    }
+
+    return {
+      ...bestSwapRoute,
+      trade,
+      methodParameters,
+    };
   }
 
   /**
