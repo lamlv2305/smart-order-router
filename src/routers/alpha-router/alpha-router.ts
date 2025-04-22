@@ -10,6 +10,7 @@ import {
   TradeType,
 } from '@uniswap/sdk-core';
 import { TokenList } from '@uniswap/token-lists';
+import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
 import { Pool, Position, SqrtPriceMath, TickMath } from '@uniswap/v3-sdk';
 import retry from 'async-retry';
 import JSBI from 'jsbi';
@@ -107,10 +108,12 @@ import {
   ID_TO_NETWORK_NAME,
   V2_SUPPORTED,
 } from '../../util/chains';
+import { DEFAULT_BLOCKS_TO_LIVE } from '../../util/defaultBlocksToLive';
 import {
   getHighestLiquidityV3NativePool,
   getHighestLiquidityV3USDPool,
 } from '../../util/gas-factory-helpers';
+import { INTENT } from '../../util/intent';
 import { log } from '../../util/log';
 import {
   buildSwapMethodParameters,
@@ -129,6 +132,7 @@ import {
   RETRY_OPTIONS,
   SUCCESS_RATE_FAILURE_OVERRIDES,
 } from '../../util/onchainQuoteProviderConfigs';
+import { serializeRouteIds } from '../../util/serializeRouteIds';
 import { UNSUPPORTED_TOKENS } from '../../util/unsupported-tokens';
 import {
   IRouter,
@@ -148,10 +152,6 @@ import {
   V4Route,
 } from '../router';
 
-import { UniversalRouterVersion } from '@uniswap/universal-router-sdk';
-import { DEFAULT_BLOCKS_TO_LIVE } from '../../util/defaultBlocksToLive';
-import { INTENT } from '../../util/intent';
-import { serializeRouteIds } from '../../util/serializeRouteIds';
 import {
   DEFAULT_ROUTING_CONFIG_BY_CHAIN,
   ETH_GAS_STATION_API_URL,
@@ -164,7 +164,11 @@ import {
   V3RouteWithValidQuote,
   V4RouteWithValidQuote,
 } from './entities/route-with-valid-quote';
-import { BestSwapRoute, getBestSwapRoute, getBestSwapRouteWithoutEstimate } from './functions/best-swap-route';
+import {
+  BestSwapRoute,
+  getBestSwapRoute,
+  getBestSwapRouteWithoutEstimate,
+} from './functions/best-swap-route';
 import { calculateRatioAmountIn } from './functions/calculate-ratio-amount-in';
 import {
   CandidatePoolsBySelectionCriteria,
@@ -1668,11 +1672,39 @@ export class AlphaRouter
       v3GasModel,
       v4GasModel,
       swapConfig,
-      providerConfig,
+      providerConfig
     );
     reportGetBestSwapRouteElapsedTime();
 
-    return bestSwapRoute;
+    const routeAmounts = bestSwapRoute?.routes;
+    if (!routeAmounts) {
+      throw new Error('No route found');
+    }
+
+    const trade = buildTrade<typeof tradeType>(
+      currencyIn,
+      currencyOut,
+      tradeType,
+      routeAmounts
+    );
+
+    let methodParameters: MethodParameters | undefined;
+
+    // If user provided recipient, deadline etc. we also generate the calldata required to execute
+    // the swap and return it too.
+    if (swapConfig) {
+      methodParameters = buildSwapMethodParameters(
+        trade,
+        swapConfig,
+        this.chainId
+      );
+    }
+
+    return {
+      ...bestSwapRoute,
+      trade,
+      methodParameters,
+    };
   }
 
   /**
